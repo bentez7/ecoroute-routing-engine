@@ -1,0 +1,15 @@
+# Environment variables — never commit
+.env
+
+# Generated road network datasets (large binary files)
+malaysia/
+kuala_lumpur/
+srtm_malaysia_chunks/
+
+# osmnx cache
+cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

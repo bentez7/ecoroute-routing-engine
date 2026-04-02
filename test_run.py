@@ -2,7 +2,7 @@ import json
 
 from nrel.routee.compass import CompassApp
 
-app = CompassApp.from_config_file("kuala_lumpur/osm_default_energy.toml")
+app = CompassApp.from_config_file("malaysia/osm_default_energy.toml")
 query = [
     {
         "origin_x": 101.71168852073818, 
