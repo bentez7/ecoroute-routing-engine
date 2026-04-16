@@ -1,30 +1,41 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import polyline as polyline_lib
+import rasterio
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 from nrel.routee.compass import CompassApp
 
+import simulate
+
 load_dotenv()
 
 API_KEY = os.getenv("ROUTEE_API_KEY", "")
 CONFIG_PATH = os.getenv("COMPASS_CONFIG", "malaysia/osm_default_energy.toml")
+SRTM_PATH = os.getenv("SRTM_PATH", str(Path.home() / "srtm_malaysia.tif"))
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 compass_app: CompassApp | None = None
+srtm_dataset: rasterio.io.DatasetReader | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global compass_app
+    global compass_app, srtm_dataset
     print(f"Loading CompassApp from {CONFIG_PATH}...")
     compass_app = CompassApp.from_config_file(CONFIG_PATH)
+    print(f"Opening SRTM raster {SRTM_PATH}...")
+    srtm_dataset = rasterio.open(SRTM_PATH)
     print("CompassApp ready.")
     yield
+    if srtm_dataset is not None:
+        srtm_dataset.close()
+    srtm_dataset = None
     compass_app = None
 
 
@@ -98,6 +109,34 @@ def route(req: RouteRequest, _: str = Security(_require_api_key)):
         })
 
     return {"routes": routes}
+
+
+class TelemetryPoint(BaseModel):
+    lat: float
+    lng: float
+    timestamp: str
+
+
+class SimulateRequest(BaseModel):
+    telemetry: list[TelemetryPoint]
+    model_name: str
+
+
+@app.post("/simulate")
+def simulate_endpoint(req: SimulateRequest, _: str = Security(_require_api_key)):
+    try:
+        return simulate.run_simulation(
+            [p.model_dump() for p in req.telemetry],
+            req.model_name,
+            srtm_dataset,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/simulate/models")
+def simulate_models(_: str = Security(_require_api_key)):
+    return {"supported_models": simulate.supported_models()}
 
 
 @app.get("/health")
