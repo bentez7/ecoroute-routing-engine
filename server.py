@@ -57,10 +57,26 @@ class RouteRequest(BaseModel):
 
 
 def _encode_geometry(path: dict) -> str:
-    """Encode GeoJSON FeatureCollection LineString as Google Encoded Polyline."""
-    coords = path["features"][0]["geometry"]["coordinates"]
-    # GeoJSON is [lng, lat]; polyline expects (lat, lng)
-    return polyline_lib.encode([(lat, lng) for lng, lat in coords])
+    """Encode a Compass geo_json traversal result as a Google Encoded Polyline.
+
+    Compass emits one Feature per traversed edge, each with a LineString. We
+    concatenate every edge's coordinates in order, de-duplicating the shared
+    vertex between consecutive edges, then encode the full path.
+    """
+    merged: list[tuple[float, float]] = []
+    for feature in path.get("features", []):
+        geom = feature.get("geometry") or {}
+        if geom.get("type") != "LineString":
+            continue
+        # GeoJSON is [lng, lat]; polyline expects (lat, lng)
+        coords = [(lat, lng) for lng, lat in geom.get("coordinates", [])]
+        if not coords:
+            continue
+        if merged and merged[-1] == coords[0]:
+            merged.extend(coords[1:])
+        else:
+            merged.extend(coords)
+    return polyline_lib.encode(merged)
 
 
 @app.post("/route")
