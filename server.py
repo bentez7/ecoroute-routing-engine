@@ -95,8 +95,8 @@ def route(req: RouteRequest, _: str = Security(_require_api_key)):
         "grid_search": {
             "test_cases": [
                 {"name": "least_time", "weights": {"trip_distance": 0, "trip_time": 1, "trip_energy_liquid": 0}},
-                {"name": "least_energy", "weights": {"trip_distance": 0, "trip_time": 0, "trip_energy_liquid": 1}},
-                {"name": "balanced", "weights": {"trip_distance": 1, "trip_time": 1, "trip_energy_liquid": 1}},
+                {"name": "least_energy", "weights": {"trip_distance": 0, "trip_time": 0, "trip_energy_liquid": 2}},
+                {"name": "balanced", "weights": {"trip_distance": 1, "trip_time": 0.5, "trip_energy_liquid": 2}},
             ]
         },
     }
