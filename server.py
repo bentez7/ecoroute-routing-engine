@@ -56,13 +56,18 @@ class RouteRequest(BaseModel):
     model_name: str = "2016_TOYOTA_Camry_4cyl_2WD"
 
 
-def _encode_geometry(path: dict) -> str:
+def _encode_geometry(path: dict | None) -> str:
     """Encode a Compass geo_json traversal result as a Google Encoded Polyline.
 
     Compass emits one Feature per traversed edge, each with a LineString. We
     concatenate every edge's coordinates in order, de-duplicating the shared
     vertex between consecutive edges, then encode the full path.
+
+    Returns "" when Compass couldn't produce a path (no routable connection
+    between origin and destination on the loaded graph).
     """
+    if not path:
+        return ""
     merged: list[tuple[float, float]] = []
     for feature in path.get("features", []):
         geom = feature.get("geometry") or {}
@@ -110,10 +115,31 @@ def route(req: RouteRequest, _: str = Security(_require_api_key)):
         results = [results]
 
     routes = []
+    by_geometry: dict[str, dict] = {}
     for r in results:
-        final_state = r["route"]["final_state"]
-        routes.append({
-            "name": r["request"]["name"],
+        route_obj = r.get("route") or {}
+        final_state = route_obj.get("final_state")
+        path = route_obj.get("path")
+        name = (r.get("request") or {}).get("name") or "unknown"
+
+        # Compass returns an entry per grid_search case even when no path is
+        # routable — skip those so we don't bubble up a 500 to the client.
+        if not final_state or not path:
+            print(f"[route] skipping {name}: no path found")
+            continue
+
+        geometry = _encode_geometry(path)
+        if not geometry:
+            print(f"[route] skipping {name}: empty geometry")
+            continue
+
+        if geometry in by_geometry:
+            by_geometry[geometry]["merged_with"].append(name)
+            continue
+
+        route = {
+            "name": name,
+            "merged_with": [],
             "summary": {
                 "trip_distance_miles": final_state.get("trip_distance"),
                 "trip_time_minutes": final_state.get("trip_time"),
@@ -121,8 +147,10 @@ def route(req: RouteRequest, _: str = Security(_require_api_key)):
                 "trip_elevation_gain_miles": final_state.get("trip_elevation_gain"),
                 "trip_elevation_loss_miles": final_state.get("trip_elevation_loss"),
             },
-            "geometry": _encode_geometry(r["route"]["path"]),
-        })
+            "geometry": geometry,
+        }
+        by_geometry[geometry] = route
+        routes.append(route)
 
     return {"routes": routes}
 
