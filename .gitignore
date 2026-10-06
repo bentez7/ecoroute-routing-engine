@@ -13,3 +13,6 @@ cache/
 __pycache__/
 *.pyc
 *.pyo
+
+# Local AI-assistant settings — never commit
+.claude/

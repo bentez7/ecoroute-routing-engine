@@ -1,6 +1,51 @@
-# EcoRoute Routing Service
+# EcoRoute Routing Engine: Energy-Aware Routing for Malaysia
 
-Energy-aware routing microservice for Malaysia, built on [NREL RouteE Compass](https://nrel.github.io/routee-compass). Exposes a REST API that returns energy-optimal, time-optimal, and balanced route alternatives as encoded polylines.
+**Finds the *fastest*, *lowest-energy* and *balanced* driving routes across all of Malaysia, accounting for road gradient, and simulates the actual energy and CO₂ of a recorded trip with physics-based vehicle models.**
+
+Part of **EcoRoute**, our Final Year Project at Monash University Malaysia (2026):
+
+| Repo | Role |
+|---|---|
+| [ecoroute-mobile](https://github.com/bentez7/ecoroute-mobile) | iOS/Android app: route planning, navigation, live coaching, trip history |
+| [ecoroute-backend](https://github.com/bentez7/ecoroute-backend) | REST API, auth, database, orchestration (Node.js · Express · Supabase) |
+| [ecoroute-ml](https://github.com/bentez7/ecoroute-ml) | Driving-behaviour classifier with explainable feedback (XGBoost · SHAP · FastAPI) |
+| **ecoroute-routing-engine** (this repo) | Energy-aware routing and trip energy simulation (NREL RouteE Compass · FASTSim) |
+
+## Highlights
+
+- **Country-scale road graph:** the whole Malaysian OpenStreetMap drive network, enriched with NASA SRTM elevation so every road segment carries its slope.
+- **Three routes in one call:** a single [NREL RouteE Compass](https://nrel.github.io/routee-compass) grid search over distance, time and energy weights returns `least_time`, `least_energy` and `balanced`. Duplicate paths are merged so the app can say *"the eco route is also the fastest"*.
+- **Trip simulation (`/simulate`):** resamples a recorded GPS trace to 1 Hz, adds road grade from SRTM, and runs NREL **FASTSim** to compute the energy the trip actually used, which the backend converts to CO₂.
+- **50+ vehicle energy models:** petrol, diesel, hybrid, plug-in hybrid and EV (Toyota Camry, Prius, Tesla Model 3, Nissan Leaf and more).
+
+### Results (from our FYP paper)
+
+Feasibility check on five Peninsular Malaysia routes (2012 Ford Fusion model):
+
+| Route | Energy saved by eco route | Extra time |
+|---|---|---|
+| Bandar Sunway → KLCC | 6.0% | 12.4% |
+| Subang Jaya → Putrajaya | 0.6% | 1.0% |
+| Petaling Jaya → Genting | 0.4% | 1.2% |
+| **Klang → KLIA** | **16.0%** | 17.2% |
+| Cheras → Shah Alam | 3.4% | 0.2% |
+
+Short urban trips offer few distinct alternatives (2.6% average saving). The longer trip with a genuinely different path saved 16%, in line with the 10–25% NREL reports on the US network.
+
+## How it fits in
+
+```mermaid
+flowchart LR
+    M["ecoroute-mobile"] --> B["ecoroute-backend"]
+    B -- "POST /route (plan time)" --> R["ecoroute-routing-engine"]
+    B -- "POST /simulate (trip end)" --> R
+    R -- "3 route polylines + energy" --> B
+    R -- "trip energy (FASTSim)" --> B
+```
+
+**Team:** Teng Kong Cheng, Wong Wei Jian, Benjamin Tan En Zhe. Teng Kong Cheng built most of this service. My own work (Benjamin) was mainly on the [mobile app](https://github.com/bentez7/ecoroute-mobile), including the route-selection screen that presents these alternatives.
+
+**Tech:** Python 3.11 · FastAPI · NREL RouteE Compass · NREL FASTSim · OSMnx · rasterio · SRTM
 
 ---
 
@@ -152,6 +197,24 @@ curl -X POST http://localhost:8080/route \
 
 ---
 
+### `POST /simulate`
+
+Simulate the energy used on a recorded trip with FASTSim. Requires `X-API-Key`.
+
+```json
+{
+  "model_name": "2016_Toyota_Prius_Two_FWD",
+  "telemetry": [
+    { "lat": 3.0671, "lng": 101.6035, "timestamp": "2026-05-01T08:00:00Z" },
+    { "lat": 3.0673, "lng": 101.6040, "timestamp": "2026-05-01T08:00:01Z" }
+  ]
+}
+```
+
+The trace needs at least 2 points, increasing timestamps, coordinates inside Malaysia and a duration of at least 2 s. `GET /simulate/models` lists the supported vehicle models.
+
+---
+
 ## The `geometry` Field — Encoded Polyline
 
 ### What it is
@@ -277,8 +340,10 @@ See `malaysia/vehicles/` for the full list.
 ## Project Structure
 
 ```
-ecoroute-routing/
+ecoroute-routing-engine/
 ├── server.py                          # FastAPI server — main entry point
+├── simulate.py                        # FASTSim trip-energy simulation
+├── cache/                             # RouteE vehicle energy models (.bin)
 ├── setup.py                           # Generate Malaysia road network dataset
 ├── test_run.py                        # Quick test without HTTP server
 ├── .env                               # API key and config (do not commit)
@@ -298,7 +363,7 @@ ecoroute-routing/
 ## Notes
 
 - **Keep the server running.** The Malaysia dataset takes ~30–60 seconds to load into memory. Do not restart it on every request.
-- **Do not commit `.env`.** Add it to `.gitignore`.
+- **Do not commit `.env` or `.claude/`.** Both are in `.gitignore`.
 - **Energy unit**: `trip_energy_liquid_gallons` is in US gallons of gasoline equivalent (GGE). Multiply by `3.785` for litres.
 - **Distance unit**: All distance values are in miles. Multiply by `1.609` for kilometres.
 - **Time unit**: `trip_time_minutes` is in minutes.
